@@ -9,8 +9,9 @@ import { ERC725} from "@erc725/erc725.js";
 import {port,web3,chainId,ERC725AccountSchema,LSP4DigitalAssetSchema,blockNumber,increment,provider,config} from './setup.js'
 //import quickstart from './locationDetection.js'
 import  { getValueForManyKeys,getKeys,hasKey } from './utils.js';
-import updateDb from './imageAnnotationPg.js'
+//import updateDb from './imageAnnotationPg.js'
 import {getBlockScoutQuery} from './fetchMethods.js'
+import { compareAddresses,getPermissionedAddresses,updatePermissionedAddresses,addOwnedAddress,removeOwnedAddress} from './firebaseMethods.js';
 const app = express();
 // Parse URL-encoded bodies (as sent by HTML forms)
 app.use(express.urlencoded());
@@ -53,17 +54,28 @@ async function parseERC725Data(data,schema,provider,config,abi){
 			console.log(data.result[i])
 			var address=data.result[i].address;
 			const erc725 = new ERC725(schema, data.result[i].address, provider, config);
-			getOwners(address);
+			var permissionedOwners=await getOwners('0xa46B1F981768Caa69F21C639765336A09D2ABd02');
+			var previousPermissionedOwners=await getPermissionedAddresses('0xa46B1F981768Caa69F21C639765336A09D2ABd02');
+			var addressDiff=await compareAddresses(previousPermissionedOwners,permissionedOwners);
+			console.log(addressDiff,'addressDiff');
+			//loop through addressDiff
+			for(var j=0;j<addressDiff.length;j++){
+				removeOwnedAddress('0xa46B1F981768Caa69F21C639765336A09D2ABd02',addressDiff[j]);
+			}
+			//loop through permissionedOwners
+			for(var j=0;j<permissionedOwners.length;j++){
+				addOwnedAddress(permissionedOwners[j],'0xa46B1F981768Caa69F21C639765336A09D2ABd02');
+			}
+			updatePermissionedAddresses('0xa46B1F981768Caa69F21C639765336A09D2ABd02',permissionedOwners);
 			try {
 				var x = await erc725.fetchData('LSP3Profile');
-				console.log(x);
 				var lsp3profile= x.LSP3Profile.LSP3Profile;
 				console.log(lsp3profile['profileImage'][0]['url']);
 				var tags=getValueForManyKeys(lsp3profile,['tags']);
 				var profileImage=getValueForManyKeys(lsp3profile,['profileImage','0','url']);
 				var backgroundImage=getValueForManyKeys(lsp3profile,['backgroundImage','0','url']);
 				var mostUpdatedblock=parseInt(data.result[i].blockNumber);
-				updateDb(address,tags,profileImage,backgroundImage,mostUpdatedblock);
+				//updateDb(address,tags,profileImage,backgroundImage,mostUpdatedblock);
 				console.log(address,tags,profileImage,backgroundImage,mostUpdatedblock,'aziza')
 			} catch (error) {
 				console.log('oh no')
@@ -74,7 +86,7 @@ async function parseERC725Data(data,schema,provider,config,abi){
 	console.log('aaa\n\n\n\n\n')
 }
 
-async function  getOwners(address){
+async function getOwners(address){
 	var owners=[];
 	//create a contract instance
 	const universalProfile=new web3.eth.Contract(UniversalProfile.abi,address);
@@ -82,7 +94,19 @@ async function  getOwners(address){
 	// get the total number of addresses that have some permissions in our UP
 	try{
 	const total = await universalProfile.methods.getData([ADDRESS_PERMISSIONS_ARRAY_KEY]).call()
-	console.log(hexToInt(total));
+	//create a loop to get all the addresses
+	console.log(hexToInt(total))
+	var addresses=[];
+	for (var i = 0; i < hexToInt(total); i++) {
+	var intString=hexToInt(i).toString();
+	var zero='0';
+	var repeatLetter=zero.repeat(32-intString.length);
+	var finalString=repeatLetter.concat(intString);
+		let address= await universalProfile.methods.getData([ADDRESS_PERMISSIONS_ARRAY_KEY.slice(0, 34) + finalString]).call()
+		console.log(address);
+		addresses.push(address[0]);
+		}
+		return addresses;
 	}
 	catch(err){
 		console.log(err)
